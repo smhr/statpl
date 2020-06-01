@@ -1,0 +1,565 @@
+!**************************************************************
+! Statpl
+! Author: Thomas Maschberger 
+! Ref: Thomas Maschberger & Pavel Kroupa, 2009, MNRAS, 395
+
+! Modification: S.Mohammad Hoseini Rad
+! smhr313@gmail.com
+! Nov 2012, IASBS, Zanjan
+! Last modification: 12 Mar 2013
+!**************************************************************
+program statpl
+use statfunmod
+use mffunmod
+use mfestmod
+use statpl_mod
+use utilmod
+implicit none
+
+integer :: i,j
+double precision :: tmp,tmpx,tmpy,step
+character(len=20) :: chartmp
+
+double precision :: infinity
+
+double precision, dimension(:), allocatable :: masses
+! smhr !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+double precision, dimension(:), allocatable :: low_masses
+double precision, dimension(:), allocatable :: high_masses
+double precision, dimension(:), allocatable :: low_masses_in_rh
+double precision, dimension(:), allocatable :: high_masses_in_rh
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+! input parameters
+character (len=50) :: datafile     ! Name of main input file (output file of naus or nbody_reader)
+! smhr !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+ character (len=50)::low_masses_datafile
+ character (len=50)::high_masses_datafile
+ integer::nlow, nhigh
+ integer::nlow_in_rh, nhigh_in_rh
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+integer :: calcstddev
+integer :: montecarlosize
+integer :: nbin
+integer :: makeplots
+double precision :: significance
+double precision, dimension(nestimators) :: est_mask
+
+
+
+! Results
+integer :: ndata
+! smhr !!!!!!!!!!!!!!!!!!!!!!!!!!
+double precision :: lbeta,lmmin,lmmax!,stddev
+double precision :: hbeta,hmmin,hmmax!,stddev
+double precision :: lbeta_in_rh,lmmin_in_rh,lmmax_in_rh
+double precision :: hbeta_in_rh,hmmin_in_rh,hmmax_in_rh
+double precision :: betbinl,betbinh,betbinlh,betbinhh
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+double precision :: dsp_inf,dsp_trunc
+
+
+double precision, dimension(ntests) :: critval_inf,critval_trunc,power
+double precision, dimension(ntests) :: statistics_data_inf,statistics_data_trunc
+double precision, dimension(ntests,3,2) :: statval_data
+double precision, dimension(:,:), allocatable :: stats_inf,stats_trunc
+character (len=50), dimension(ntests) :: stat_names
+character (len=50), dimension(nestimators) :: est_names
+double precision, dimension(nestimators,3) :: estout
+double precision, dimension(nestimators,9) :: eststat
+
+! smhr !!!!!!!!!!!!!!!!!!!!!!!!!!!
+integer::ll, hh, llh, hhh
+real*8::rt, rh ! Tidal & half mass radius 
+real*8::sim_time ! Time of simulation
+real*8::Mtot, MNow, MNow_to_Mtot ! Total mass, Mass in the time of "sim_time"
+real*8,dimension(:),allocatable::mx, my, mz , mr ! x,y,z and position of stars
+real*8,dimension(:),allocatable::vx, vy, vz, kstar, lum, radius
+integer,dimension(:),allocatable::NAME
+real*8,dimension(:),allocatable::lmx, lmy, lmz, hmx, hmy, hmz ! x,y and z of low mass and high mass stars
+real*8,dimension(:),allocatable::lmx_in_rh, lmy_in_rh, lmz_in_rh, hmx_in_rh, hmy_in_rh, hmz_in_rh ! x,y and z of low mass and high mass stars inside Rh.
+
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+!!!!!!! !!!!!!! !!!!!!! !!!!!!! !!!!!!! !!!!!!! !!!!!!!
+!!!!!!! Initialise
+!!!!!!! !!!!!!! !!!!!!! !!!!!!! !!!!!!! !!!!!!! !!!!!!!
+infinity=1.e30
+est_names=""
+call name_estimators (est_names)
+stat_names=""
+call name_statistics (stat_names)
+
+eststat=0.
+statistics_data_inf=0.
+statistics_data_trunc=0.
+
+! open(1000,file="statmfout.txt",action="write")
+
+
+
+!!!!!!! !!!!!!! !!!!!!! !!!!!!! !!!!!!! !!!!!!! !!!!!!!
+!!!!!!! Read the parameters
+!!!!!!! !!!!!!! !!!!!!! !!!!!!! !!!!!!! !!!!!!! !!!!!!!
+! Name of the data files
+! write(*,*) "Data file:"
+read(*,*) datafile
+! smhr !!!!!!!!!!!
+read(*,*) low_masses_datafile
+read(*,*) high_masses_datafile
+open(500,file=low_masses_datafile)
+open(600,file=high_masses_datafile)
+write(*,*) "using ",datafile
+! write(1000,*) "Data file: "
+! write(1000,*) datafile
+
+read(*,*) nbin
+! 
+! do i=1,nestimators
+! 	read(*,*) est_mask(i)
+! end do
+
+! read(*,*) calcstddev
+! read(*,*) montecarlosize
+! read(*,*) significance
+! read(*,*) makeplots
+!!!!!!!!!!!!!!!!!
+! smhr
+read(*,*) Mtot
+read(*,*) MNow
+read(*,*) rt ! Tidal radius
+read(*,*) rh ! Half-mass radius
+read(*,*) sim_time ! Time of simulation
+!!!!!!!!!!!!!!!!!
+
+! allocate(stats_inf(montecarlosize,ntests))
+! allocate(stats_trunc(montecarlosize,ntests))
+
+
+!!!!!!! !!!!!!! !!!!!!! !!!!!!! !!!!!!! !!!!!!! !!!!!!!
+!!!!!!! Read the data
+!!!!!!! !!!!!!! !!!!!!! !!!!!!! !!!!!!! !!!!!!! !!!!!!!
+
+ndata=numberoflines(datafile)
+write(*,*) "Number of data"
+write(*,*) ndata
+
+allocate(masses(ndata))
+! smhr !!!!!!!!!!!!!!!!!!!!!!!!
+allocate (mx(ndata)); allocate (my(ndata)); allocate (mz(ndata))
+allocate (mr(ndata))
+allocate (vx(ndata)); allocate (vy(ndata)); allocate (vz(ndata))
+allocate (kstar(ndata)); allocate (lum(ndata)); allocate (radius(ndata)); allocate(NAME(ndata))
+
+nlow = 0; nhigh = 0; nlow_in_rh = 0; nhigh_in_rh = 0
+open(1,file=datafile,action="read",status="old")
+
+do i=1,ndata     ! Reading all data from datafile and saving them in appropriate arrays.
+	read (1,*) NAME(i), mx(i), my(i), mz(i), vx(i), vy(i), vz(i), kstar(i), lum(i), radius(i), masses(i)
+	mr(i) = sqrt(mx(i)*mx(i) + my(i)*my(i) + mz(i)*mz(i))
+! 	if ( ( mr(i) - rt ) <= 1e-5 ) then ! Check if the star is in the tidal radius, then do:
+		if ( kstar(i) < 7 ) then
+			if ( (masses(i) - 0.5) < 1e-5 ) then
+				nlow = nlow + 1
+				if ( ( mr(i) - rh ) <= 1e-5 ) nlow_in_rh = nlow_in_rh + 1 
+			elseif ( (masses(i) - 0.5) >= 1e-5 .and. masses(i) <= 1. ) then
+				nhigh = nhigh + 1
+				if ( ( mr(i) - rh ) <= 1e-5 ) nhigh_in_rh = nhigh_in_rh + 1
+			endif
+		endif
+! 	endif
+end do
+! print*,nlow, nhigh
+!!!!!!!!!!!!!!!!!!!!!!
+allocate(low_masses(nlow)); allocate(high_masses(nhigh)) ! Allocate low_masses & high_masses arrays inside tidal radius.
+allocate (lmx(nlow)); allocate (lmy(nlow)); allocate (lmz(nlow)) ! Allocate low mass coordinates arrays.
+allocate (hmx(nhigh)); allocate (hmy(nhigh)); allocate (hmz(nhigh)) ! Allocate high masse coordinates arrays
+!!!!!!!!!!!!!!!!!!!!!!
+allocate(low_masses_in_rh(nlow_in_rh)); allocate(high_masses_in_rh(nhigh_in_rh)) ! Allocate low_masses & high_masses arrays inside Rh.
+allocate (lmx_in_rh(nlow_in_rh)); allocate (lmy_in_rh(nlow_in_rh)); allocate (lmz_in_rh(nlow_in_rh)) ! Allocate low mass coordinates arrays inside Rh.
+allocate (hmx_in_rh(nhigh_in_rh)); allocate (hmy_in_rh(nhigh_in_rh)); allocate (hmz_in_rh(nhigh_in_rh)) ! Allocate high masse coordinates arrays inside Rh.
+!!!!!!!!!!!!!!!!!!!!!!
+
+ll = 0; hh = 0; llh = 0; hhh = 0
+do i=1,ndata     ! Writing data in appropriate arrays according to their masses and positions inside or outside of Rh. 
+! 	if ( ( mr(i) - rt ) <= 1e-5 ) then ! Check if the star is in the tidal radius, then do:
+		if ( kstar(i) < 7 ) then
+			if ( (masses(i) - 0.5) < 1e-5 ) then
+				ll = ll + 1
+				low_masses(ll) = masses(i); lmx(ll) = mx(i); lmy(ll) = my(i); lmz(ll) = mz(i)
+				write (500,*) low_masses(ll), lmx(ll), lmy(ll), lmz(ll)
+				if ( ( mr(i) - rh ) <= 1e-5 ) then
+					llh = llh + 1
+					low_masses_in_rh(llh) = masses(i); lmx_in_rh(llh) = mx(i); lmy_in_rh(llh) = my(i); lmz_in_rh(llh) = mz(i)
+				endif
+			elseif ( (masses(i) - 0.5) >= 1e-5 .and. masses(i) <= 1. ) then
+				hh = hh + 1
+				high_masses(hh) = masses(i); hmx(hh) = mx(i); hmy(hh) = my(i); hmz(hh) = mz(i)
+				write (600,*) high_masses(hh), hmx(hh), hmy(hh), hmz(hh)
+				if ( ( mr(i) - rh ) <= 1e-5 ) then
+					hhh = hhh + 1
+					high_masses_in_rh(hhh) = masses(i); hmx_in_rh(hhh) = mx(i); hmy_in_rh(hhh) = my(i); hmz_in_rh(hhh) = mz(i)
+				endif
+			endif
+		endif
+! 	endif
+end do
+
+ close(1); close(500); close(600)
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+ call sort(low_masses)
+ call sort(high_masses)
+ call sort(low_masses_in_rh)
+ call sort(high_masses_in_rh)
+! 
+write(*,*) "Minimum of low_masses data is", low_masses(1)
+write(*,*) "Maximum of low_masses data is", low_masses(nlow)
+write(*,*) "Minimum of high_masses data is", high_masses(1)
+write(*,*) "Maximum of high_masses data is", high_masses(nhigh)
+
+! 
+! !!!!!!! !!!!!!! !!!!!!! !!!!!!! !!!!!!! !!!!!!! !!!!!!!
+! !!!!!!! Call the Estimators
+! !!!!!!! !!!!!!! !!!!!!! !!!!!!! !!!!!!! !!!!!!! !!!!!!!
+! 
+
+!!!!!!!!!!!!!!!!!!!!!!!!! For low mass stars inside Rt
+
+ estout=0
+ call modmlest (low_masses,lbeta,lmmin,lmmax)
+ if (nbin<0) nbin=floor(2*size(high_masses)**(2./5.))
+ write(*,*) "Used number of low mass star bins:", nbin
+ call constbinestlr (nbin,low_masses,betbinl)
+
+!!!!!!!!!!!!!!!!!!!!!!!!!!! For high mass stars inside Rt
+
+ estout=0
+ call modmlest (high_masses,hbeta,hmmin,hmmax)
+ if (nbin<0) nbin=floor(2*size(high_masses)**(2./5.))
+ write(*,*) "Used number of high mass star bins:", nbin
+ call constbinestlr (nbin,high_masses,betbinh)
+
+!!!!!!!!!!!!!!!!!!!!!!!!!! For low mass stars inside Rh
+
+ estout=0
+ call modmlest (low_masses_in_rh,lbeta_in_rh,lmmin_in_rh,lmmax_in_rh)
+ if (nbin<0) nbin=floor(2*size(low_masses_in_rh)**(2./5.))
+ write(*,*) "Used number of low mass star bins inside Rh:", nbin
+ call constbinestlr (nbin,low_masses_in_rh,betbinlh)
+
+!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+ estout=0
+ call modmlest (high_masses_in_rh,hbeta_in_rh,hmmin_in_rh,hmmax_in_rh)
+ if (nbin<0) nbin=floor(2*size(high_masses_in_rh)**(2./5.))
+ write(*,*) "Used number of high mass star bins inside Rh:", nbin
+ call constbinestlr (nbin,high_masses_in_rh,betbinhh)
+
+!!!!!!!!!!!!!!!!!!!!!!!!!!
+MNow_to_Mtot = MNow/Mtot
+!!!!!!!!!!!!!!!!!!!!!!!!!
+
+open(700, file='alpha_mml', ACCESS='append')
+open(800, file='alpha_constbin', ACCESS='append')
+write (*,'(6f10.3)') sim_time, MNow_to_Mtot, lbeta, hbeta, lbeta_in_rh, hbeta_in_rh
+write (*,'(6f10.3)') sim_time, MNow_to_Mtot,betbinl,betbinh,betbinlh,betbinhh 
+write(*,*)"***************************************"
+write (700,'(14f10.3)') sim_time, MNow_to_Mtot, lbeta, hbeta, lbeta_in_rh, hbeta_in_rh, lmmin, lmmax, hmmin, hmmax, lmmin_in_rh,&
+&lmmax_in_rh, hmmin_in_rh , hmmax_in_rh
+write (800,'(6f10.3)') sim_time, MNow_to_Mtot,betbinl,betbinh,betbinlh,betbinhh
+
+
+!!! This part of code is not needed. !!!
+!!!!!!! !!!!!!! !!!!!!! !!!!!!! !!!!!!! !!!!!!! !!!!!!!
+!!!!!!! Calculate the statistics
+!!!!!!! !!!!!!! !!!!!!! !!!!!!! !!!!!!! !!!!!!! !!!!!!!
+
+! if (calcstddev > 0) then
+! call calceststat (montecarlosize,size(masses),beta,mmin,mmax,&
+! nbin,est_mask,eststat,significance,critval_inf,critval_trunc,power,stats_inf,stats_trunc)
+! call calculate_statistics(masses,beta,mmin,infinity,statistics_data_inf)
+! call calculate_statistics(masses,beta,mmin,mmax,statistics_data_trunc)
+! end if
+
+! write(*,*) "ALPHA:              : Estimate   : Average    : Std. Dev.  : Bias       :"
+! write(1000,*) "ALPHA:              : Estimate   : Average    : Std. Dev.  : Bias       :"
+! do i=1,nestimators
+! write(1000,'(A20," : ",F10.3," : ",F10.3," : ",F10.3," : ",F10.3," : ")') &
+! est_names(i),estout(i,1),eststat(i,1),eststat(i,2),eststat(i,3)
+! write(*,'(A20," : ",F10.3," : ",F10.3," : ",F10.3," : ",F10.3," : ")') &
+! est_names(i),estout(i,1),eststat(i,1),eststat(i,2),eststat(i,3)
+! end do
+! write(*,*) "X MAX:              : Estimate   : Average    : Std. Dev.  : Bias       :"
+! write(1000,*) "X MAX:              : Estimate   : Average    : Std. Dev.  : Bias       :"
+! do i=1,nestimators
+! write(1000,'(A20," : ",F10.3," : ",F10.3," : ",F10.3," : ",F10.3," : ")') &
+! est_names(i),estout(i,3),eststat(i,7),eststat(i,8),eststat(i,9)
+! write(*,'(A20," : ",F10.3," : ",F10.3," : ",F10.3," : ",F10.3," : ")') &
+! est_names(i),estout(i,3),eststat(i,7),eststat(i,8),eststat(i,9)
+! end do
+
+! stddev=eststat(imodml,2)
+
+
+!!!!!!! !!!!!!! !!!!!!! !!!!!!! !!!!!!! !!!!!!! !!!!!!!
+!!!!!!! Some Output
+!!!!!!! !!!!!!! !!!!!!! !!!!!!! !!!!!!! !!!!!!! !!!!!!!
+! Estimated Values
+! write(1000,*) "Modified Maximum Likelihood"
+! write(1000,*) "Estimated exponent"
+! write(1000,*) beta
+! write(1000,*) "Standard deviation of the estimated exponent"
+! write(1000,*) stddev
+! write(1000,*) "Estimated lower limit"
+! write(1000,*) mmin
+! write(1000,*) "Estimated upper limit"
+! write(1000,*) mmax
+
+! write(*,*) "Modified Maximum Likelihood results, used furtheron"
+! write(*,*) "Estimated exponent"
+! write(*,*) beta
+! write(*,*) "Standard deviation of the estimated exponent"
+! write(*,*) stddev
+! write(*,*) "Estimated lower limit"
+! write(*,*) mmin
+! write(*,*) "Estimated upper limit"
+! write(*,*) mmax
+
+! ! Results of the statistics
+! write(1000,*) "TESTS FOR NOT TRUNCATED POWER LAW, significance ",significance
+! ! write(*,*) "TESTS FOR NOT TRUNCATED POWER LAW, significance ",significance
+! write(1000,*) "Statistic           : data       : CritValInf : Perc. Sig. : 1-P.S.     : Power      : Conclusion"
+! ! write(*,*) "Statistic           : data       : CritValInf : Perc. Sig. : 1-P.S.     : Power      : Conclusion"
+! statval_data=0.
+! do i=1,ntests
+! do j=2,montecarlosize
+! if (statistics_data_inf(i) <= stats_inf(j,i) .AND. statval_data(i,1,1) < 1. ) then
+! 	statval_data(i,1,1)=float(j-1)
+! 	statval_data(i,1,2)=stats_inf(j-1,i)
+! 	statval_data(i,2,1)=float(j)
+! 	statval_data(i,2,2)=stats_inf(j,i)
+! 	tmp= ( statistics_data_inf(i) - stats_inf(j-1,i) ) / ( stats_inf(j,i) - stats_inf(j-1,i))
+! 	statval_data(i,3,1)=(tmp + float(j-1))/float(montecarlosize)*100
+! 	statval_data(i,3,2)=statistics_data_inf(i)
+! end if
+! end do
+! if (statistics_data_inf(i) <= stats_inf(1,i)) then
+! statval_data(i,1,1)=1.
+! statval_data(i,1,2)=stats_inf(1,i)
+! statval_data(i,2,1)=float(montecarlosize)
+! statval_data(i,2,2)=stats_inf(montecarlosize,i)
+! statval_data(i,3,1)=0.
+! statval_data(i,3,2)=statistics_data_inf(i)
+! end if
+! if (statistics_data_inf(i) >= stats_inf(montecarlosize,i)) then
+! j=montecarlosize
+! statval_data(i,1,1)=1.
+! statval_data(i,1,2)=stats_inf(1,i)
+! statval_data(i,2,1)=float(montecarlosize)
+! statval_data(i,2,2)=stats_inf(montecarlosize,i)
+! statval_data(i,3,1)=100.
+! statval_data(i,3,2)=statistics_data_inf(i)
+! end if
+! 
+! chartmp="not truncated"
+! if (statistics_data_inf(i) > critval_inf(i)) chartmp="*** TRUNCATED ***"
+! write(*,'(A20," : ",F10.3," : ",F10.3," : ",F10.3," : ",F10.3," : ",F10.3," : ",A20)') &
+! stat_names(i),statistics_data_inf(i),critval_inf(i),statval_data(i,3,1),100.-statval_data(i,3,1),power(i),chartmp
+! write(1000,'(A20," : ",F10.3," : ",F10.3," : ",F10.3," : ",F10.3," : ",F10.3," : ",A20)')  &
+! stat_names(i),statistics_data_inf(i),critval_inf(i),statval_data(i,3,1),100.-statval_data(i,3,1),power(i),chartmp
+! end do
+
+
+
+
+! statval_data=0
+! 
+! write(*,*) "TESTS FOR TRUNCATED POWER LAW"
+! write(1000,*) "TESTS FOR TRUNCATED POWER LAW"
+! write(1000,*) "Statistic           : data       : CrValTrunc : Perc. Sig. : 1-P.S.     : Conclusion"
+! write(*,*) "Statistic           : data       : CrValTrunc : Perc. Sig. : 1-P.S.     : Conclusion"
+! 	do i=1,ntests-4
+! 
+! ! Determine first the percentiles for the data stemming from the hypothesis truncated
+! do j=2,montecarlosize
+! if (statistics_data_trunc(i) <= stats_trunc(j,i) .AND. statval_data(i,1,1) < 1. ) then
+! 	statval_data(i,1,1)=float(j-1)
+! 	statval_data(i,1,2)=stats_trunc(j-1,i)
+! 	statval_data(i,2,1)=float(j)
+! 	statval_data(i,2,2)=stats_trunc(j,i)
+! 	tmp= ( statistics_data_trunc(i) - stats_trunc(j-1,i) ) / ( stats_trunc(j,i) - stats_trunc(j-1,i))
+! 	statval_data(i,3,1)=(tmp + float(j-1))/float(montecarlosize)*100
+! 	statval_data(i,3,2)=statistics_data_trunc(i)
+! end if
+! end do
+! if (statistics_data_trunc(i) <= stats_trunc(1,i)) then
+! statval_data(i,1,1)=1.
+! statval_data(i,1,2)=stats_trunc(1,i)
+! statval_data(i,2,1)=float(montecarlosize)
+! statval_data(i,2,2)=stats_trunc(montecarlosize,i)
+! statval_data(i,3,1)=0.
+! statval_data(i,3,2)=statistics_data_trunc(i)
+! end if
+! if (statistics_data_trunc(i) >= stats_trunc(montecarlosize,i)) then
+! j=montecarlosize
+! statval_data(i,1,1)=1.
+! statval_data(i,1,2)=stats_trunc(1,i)
+! statval_data(i,2,1)=float(montecarlosize)
+! statval_data(i,2,2)=stats_trunc(montecarlosize,i)
+! statval_data(i,3,1)=100.
+! statval_data(i,3,2)=statistics_data_trunc(i)
+! end if
+
+
+! ! Check if data are consistent with a truncated power law and output
+! chartmp="*** CONSISTENT ***"
+! if (statistics_data_trunc(i) > critval_trunc(i)) chartmp="not consistent"
+! write(*,'(A20," : ",F10.3," : ",F10.3," : ",F10.3," : ",F10.3," : ",A20)') &
+! stat_names(i),statistics_data_trunc(i),critval_trunc(i),statval_data(i,3,1),100.-statval_data(i,3,1),chartmp
+! write(1000,'(A20," : ",F10.3," : ",F10.3," : ",F10.3," : ",F10.3," : ",A20)') &
+! stat_names(i),statistics_data_trunc(i),critval_trunc(i),statval_data(i,3,1),100.-statval_data(i,3,1),chartmp
+! end do
+
+
+! dsp_inf=0.001
+! dsp_trunc=0.001
+! 
+! ! Changing and setting the variables for better readability below
+! dsp_inf=critval_inf(4)
+! dsp_trunc=critval_trunc(4)
+! 
+! if (makeplots == 1) then
+! 	
+! 	!!!!!!! !!!!!!! !!!!!!! !!!!!!! !!!!!!! !!!!!!! !!!!!!!
+! 	!!!!!!! Plot the stabilized probability (SPP) plot
+! 	!!!!!!! Null hypothesis (diagonal) = not truncated/infinite PL
+! 	!!!!!!! !!!!!!! !!!!!!! !!!!!!! !!!!!!! !!!!!!! !!!!!!!
+! 	
+! 	open(1,file="sppinf_data.txt",action="write")
+! 	open(2,file="sppinf_estimated.txt",action="write")
+! 	open(3,file="sppinf_infinity.txt",action="write")
+! 	do i=1,size(masses)
+! 		tmpx=intpdfpl(masses(i),beta,mmin,infinity)
+! 	! Data
+! 		tmpy=(float(i)-0.5)/float(size(masses))
+! 		write(1,*) stabquant(tmpx),stabquant(tmpy)
+! 	end do
+! 	tmp=0.9999
+! 	do
+! 		tmpy=tmp
+! 		tmp=invintpdfpl(tmp,beta,mmin,infinity)
+! 	! Theory, estimated 
+! 		tmpx=intpdfpl(tmp,beta,mmin,mmax)
+! 		if (tmp<mmax) write(2,*) stabquant(tmpy),stabquant(tmpx)
+! 	! Theory, infinite
+! 		tmpx=intpdfpl(tmp,beta,mmin,infinity)
+! 		write(3,*) stabquant(tmpy),stabquant(tmpx)	
+! 	! The following is for an approximately equal spacing of the plotting points	
+! 		tmp=tmpy
+! 		if(tmp>0.85) tmp=tmp-0.005
+! 		if(tmp<=0.85 .AND. TMP >0.1) tmp=tmp-0.01
+! 		if(tmp < 0.1) tmp=tmp-0.005
+! 	if (tmp < 0.) exit
+! 	end do
+! 	close(1);close(2);close(3);
+! 	
+! 	! Plot the reference line (=diagonal from 0,0 to 1,1) and the 
+! 	! acceptance region (d)
+! 	open(1,file="sppinf_dplus.txt",action="write")
+! 	write(1,*) 0,dsp_inf
+! 	write(1,*) 1-dsp_inf,1
+! 	close(1)
+! 	open(1,file="sppinf_dminus.txt",action="write")
+! 	write(1,*) dsp_inf,0
+! 	write(1,*) 1,1-dsp_inf
+! 	close(1)
+! 	
+! 	! Write some ticks and labels for the plot 
+! 	! Calculate the masses corresponding to the theoretical quantiles
+! 	! (used for plotting)
+! 	tmp=log10(maxval(masses))-log10(minval(masses))
+! 	tmp=tmp*10
+! 	tmp=floor(tmp)
+! 	step=tmp/100.
+! 	step=0.1
+! 	tmp=ceiling(10.*log10(minval(masses)))/10.
+! 	open(1,file="sppinf_ticks.txt",action="write")
+! 	do 
+! 	tmpx=intpdfpl(10.**tmp,beta,mmin,infinity)
+! 	tmpx=stabquant(tmpx)
+! 	write(1,*) tmp,tmpx
+! 	tmp=tmp+step
+! 	if (tmp >= log10(mmax) ) exit
+! 	end do
+! 	close(1);
+! 	
+! 	!!!!!!! !!!!!!! !!!!!!! !!!!!!! !!!!!!! !!!!!!! !!!!!!!
+! 	!!!!!!! Plot the stabilized probability (SPP) plot
+! 	!!!!!!! Null hypothesis (diagonal) = truncated PL
+! 	!!!!!!! !!!!!!! !!!!!!! !!!!!!! !!!!!!! !!!!!!! !!!!!!!
+! 	open(1,file="spptrunc_data.txt",action="write")
+! 	open(2,file="spptrunc_estimated.txt",action="write")
+! 	open(3,file="spptrunc_infinity.txt",action="write")
+! 	do i=1,size(masses)
+! 		tmpx=intpdfpl(masses(i),beta,mmin,mmax)
+! 	! Data
+! 		tmpy=(float(i)-0.5)/float(size(masses))
+! 		write(1,*) stabquant(tmpx),stabquant(tmpy)
+! 	end do
+! 	tmp=0.9999
+! 	do
+! 		tmpy=tmp
+! 		tmp=invintpdfpl(tmp,beta,mmin,mmax)
+! 	! Theory, estimated 
+! 		tmpx=intpdfpl(tmp,beta,mmin,mmax)
+! 		if (tmp<mmax) write(2,*) stabquant(tmpy),stabquant(tmpx)
+! 	! Theory, infinite
+! 		tmpx=intpdfpl(tmp,beta,mmin,infinity)
+! 		write(3,*) stabquant(tmpy),stabquant(tmpx)
+! 		
+! 	! The following is for an approximately equal spacing of the plotting points	
+! 		tmp=tmpy
+! 		if(tmp>0.85) tmp=tmp-0.005
+! 		if(tmp<=0.85 .AND. TMP >0.1) tmp=tmp-0.01
+! 		if(tmp < 0.1) tmp=tmp-0.005
+! 	if (tmp < 0.) exit
+! 	end do
+! 	close(1);close(2);close(3);
+! 	! Plot the reference line (=diagonal from 0,0 to 1,1) and the 
+! 	! acceptance region (d)
+! 	open(1,file="spptrunc_dplus.txt",action="write")
+! 	write(1,*) 0,dsp_trunc
+! 	write(1,*) 1-dsp_trunc,1
+! 	close(1)
+! 	open(1,file="spptrunc_dminus.txt",action="write")
+! 	write(1,*) dsp_trunc,0
+! 	write(1,*) 1,1-dsp_trunc
+! 	close(1)
+! 	
+! 	! Write some ticks and labels for the plot 
+! 	! Calculate the masses corresponding to the theoretical quantiles
+! 	! (used for plotting)
+! 	tmp=log10(maxval(masses))-log10(minval(masses))
+! 	tmp=tmp*10
+! 	tmp=floor(tmp)
+! 	step=tmp/100.
+! 	step=0.1
+! 	tmp=ceiling(10.*log10(minval(masses)))/10.
+! 	
+! 	open(1,file="spptrunc_ticks.txt",action="write")
+! 	do 
+! 	tmpx=intpdfpl(10.**tmp,beta,mmin,mmax)
+! 	tmpx=stabquant(tmpx)
+! 	write(1,*) tmp,tmpx
+! 	tmp=tmp+step
+! 	if (tmp >= log10(mmax) ) exit
+! 	end do
+! 	close(1);
+! 	
+! 	
+! end if
+! 
+
+end program statpl

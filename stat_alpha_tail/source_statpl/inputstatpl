@@ -1,0 +1,16 @@
+CCCCC  !smaller_than_0.5	!masses.dat		! name of data file massspec.dat
+low_CCCCC
+high_CCCCC
+-1				! number of bins, -1 for auto
+0	! Beg
+0	! Beg recursive
+0	! Baxter
+1	! Const bin LR
+1	! Var bin chi
+1	! ML
+1	! Mod  ML
+0	! CCD
+0		! calculate standard deviation of estimators and power of tests
+10		! Monte-Carlo sampling size
+0.05	! Significance level
+0	! make plots

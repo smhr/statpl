@@ -1,0 +1,7 @@
+A slightly modified version of statpl code. 
+
+statpl estimates the parameter of power-law distributed data and calculates goodness-of-fit tests for them. Many objects studied in astronomy follow a power-law distribution function (DF), for example the masses of stars or star clusters. Such data is often analyzed by generating a histogram and fitting a straight line to it. The parameters obtained in this way can be severely biased, and the properties of the underlying DF, such as its shape or a possible upper limit, are difficult to extract. statpl is an (effectively) bias-free estimator for the exponent and the upper limit.
+
+Ref: Thomas Maschberger & Pavel Kroupa, 2009, MNRAS, 395
+
+https://ascl.net/1206.006
